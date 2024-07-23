@@ -2,17 +2,17 @@ package main
 
 import (
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"os"
 	"sync"
+    "GptSSH/utils"
 
 	ssh "golang.org/x/crypto/ssh"
 )
 
 func main() {
-    KeysMap := readKeys("authorized_keys")
+    KeysMap := readKeys("./files/authorized_keys")
     //config is the config struct to handle SSH for a tcp server
     config := &ssh.ServerConfig{
         PasswordCallback: func(c ssh.ConnMetadata, pass []byte) (*ssh.Permissions, error){
@@ -33,7 +33,7 @@ func main() {
         },
     }
 
-    privateKeyBytes, err := os.ReadFile("id_rsa")
+    privateKeyBytes, err := os.ReadFile("./files/id_rsa")
     if err != nil {
         panic("Could not read rsa")
     }
@@ -81,19 +81,6 @@ func readKeys(file string) map[string]bool{
     return authorizedKeysMap
 }
 
-func handleInput(channel ssh.Channel){
-        for {
-            data := make([]byte, 256)
-            n, err := channel.Read(data)
-            if err != nil {
-                if err == io.EOF{
-                    break
-                }
-                panic("Error reading channel data")
-            }
-            log.Println(string(data[:n]))
-        }
-}
 
 func handleConnection(conn net.Conn, config *ssh.ServerConfig){
     //now we have to perform the SSH handshake
@@ -133,7 +120,7 @@ func handleConnection(conn net.Conn, config *ssh.ServerConfig){
             wg.Done()
         }(req)
 
-        go handleInput(channel)
+        go utils.HandleInput(channel)
 
     }
 }
