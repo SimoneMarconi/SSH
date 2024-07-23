@@ -1,0 +1,141 @@
+package main
+
+import (
+	"fmt"
+	"log"
+	"net"
+	"os"
+	"sync"
+
+	ssh "golang.org/x/crypto/ssh"
+	// "golang.org/x/term"
+)
+
+func main() {
+    KeysMap := readKeys("authorized_keys")
+    //config is the config struct to handle SSH for a tcp server
+    config := &ssh.ServerConfig{
+        PasswordCallback: func(c ssh.ConnMetadata, pass []byte) (*ssh.Permissions, error){
+            if c.User() == "simone" && string(pass) == "ciao"{
+                return nil, nil
+            }
+            return nil, fmt.Errorf("Wrong password for %s", c.User())
+        },
+        PublicKeyCallback: func(c ssh.ConnMetadata, key ssh.PublicKey)(*ssh.Permissions, error){
+            if KeysMap[string(key.Marshal())]{
+                return &ssh.Permissions{
+                    Extensions: map[string]string{
+                        "pubkey-fp": ssh.FingerprintSHA256(key),
+                    },
+                }, nil
+            }
+            return nil, fmt.Errorf("Unknown public key for %s", c.User())
+        },
+    }
+
+    privateKeyBytes, err := os.ReadFile("id_rsa")
+    if err != nil {
+        panic("Could not read rsa")
+    }
+    privateKey, err := ssh.ParsePrivateKeyWithPassphrase(privateKeyBytes, []byte("test"))
+    if err != nil {
+        log.Panicf("Could not parse the private key, err: %s", err)
+    }
+    config.AddHostKey(privateKey)
+    //the configuration to handle SSH is finished, now we have to configure the tcp endpoint listening for connections
+
+    log.Println("Starting to listen")
+    listener, err := net.Listen("tcp", "127.0.0.1:2000")
+    if err != nil {
+        panic("Could not initialize the tcp listener")
+    }
+    conn, err := listener.Accept()
+    if err != nil{
+        panic("Error Accepting connections")
+    }
+    //now we have to perform the SSH handshake
+    // scon, ch, reqch, err := ssh.NewServerConn(conn, config)
+    _, ch, reqch, err := ssh.NewServerConn(conn, config)
+    if err != nil{
+        panic("Error during the Handshake")
+    }
+    // log.Printf("Logged in with key %s", scon.Permissions.Extensions["pubkey-fp"])
+
+    //Handling sync with the different server connections
+    var wg sync.WaitGroup
+    defer wg.Wait()
+
+    wg.Add(1)
+    go func(){
+        //TODO: Handle this 
+        ssh.DiscardRequests(reqch)//we are discarding all the requests
+        wg.Done()
+    }()
+
+    for newChannel := range ch{
+        //we only handle shell sessions, these are signed with the type session
+        if newChannel.ChannelType() != "session"{
+            newChannel.Reject(ssh.UnknownChannelType, "unknown channel type")
+            continue
+        }
+        channel, req, err := newChannel.Accept()
+        if err != nil{
+            panic("Could not accept Channel")
+        }
+        wg.Add(1)
+        go func(in <-chan *ssh.Request){
+            for r := range in{
+                r.Reply(r.Type == "shell", nil)
+            }
+            wg.Done()
+        }(req)
+
+        var data []byte
+        for {
+            channel.Read(data)
+            log.Println(data) 
+        }
+        
+        // terminal := term.NewTerminal(channel, "$ ")
+        // wg.Add(1)
+        // go func(){
+        //     defer func(){
+        //         log.Println("Closing everything")
+        //         channel.Close()
+        //         wg.Done()
+        //     }()
+        //     for {
+        //         log.Printf("entering")
+        //         line, err := terminal.ReadLine()
+        //         log.Printf(line)
+        //         if err != nil {
+        //             break
+        //         }
+        //         log.Printf("Read: %s\n", line)
+        //         if line == "exit"{
+        //             break
+        //         }
+        //     }
+        // }()
+    }
+}
+
+func readKeys(file string) map[string]bool{
+	authorizedKeysBytes, err := os.ReadFile(file)
+    if err != nil{
+        panic("Keys file not found")
+    }
+
+    authorizedKeysMap := map[string]bool{}
+
+    for len(authorizedKeysBytes) > 0 {
+        publicKey, _, _, rest, err := ssh.ParseAuthorizedKey(authorizedKeysBytes)
+        if err != nil{
+            log.Panicf("Error parsing Public Keys: %s", err)
+        }
+
+        authorizedKeysMap[string(publicKey.Marshal())] = true
+        authorizedKeysBytes = rest
+    }
+    return authorizedKeysMap
+}
