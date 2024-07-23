@@ -2,13 +2,13 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"os"
 	"sync"
 
 	ssh "golang.org/x/crypto/ssh"
-	// "golang.org/x/term"
 )
 
 func main() {
@@ -49,75 +49,16 @@ func main() {
     if err != nil {
         panic("Could not initialize the tcp listener")
     }
-    conn, err := listener.Accept()
-    if err != nil{
-        panic("Error Accepting connections")
-    }
-    //now we have to perform the SSH handshake
-    // scon, ch, reqch, err := ssh.NewServerConn(conn, config)
-    _, ch, reqch, err := ssh.NewServerConn(conn, config)
-    if err != nil{
-        panic("Error during the Handshake")
-    }
-    // log.Printf("Logged in with key %s", scon.Permissions.Extensions["pubkey-fp"])
-
-    //Handling sync with the different server connections
-    var wg sync.WaitGroup
-    defer wg.Wait()
-
-    wg.Add(1)
-    go func(){
-        //TODO: Handle this 
-        ssh.DiscardRequests(reqch)//we are discarding all the requests
-        wg.Done()
-    }()
-
-    for newChannel := range ch{
-        //we only handle shell sessions, these are signed with the type session
-        if newChannel.ChannelType() != "session"{
-            newChannel.Reject(ssh.UnknownChannelType, "unknown channel type")
-            continue
-        }
-        channel, req, err := newChannel.Accept()
+    defer listener.Close()
+    //listening loop
+    for {
+        conn, err := listener.Accept()
         if err != nil{
-            panic("Could not accept Channel")
+            log.Println("Could not accept the connections")
         }
-        wg.Add(1)
-        go func(in <-chan *ssh.Request){
-            for r := range in{
-                r.Reply(r.Type == "shell", nil)
-            }
-            wg.Done()
-        }(req)
-
-        var data []byte
-        for {
-            channel.Read(data)
-            log.Println(data) 
-        }
-        
-        // terminal := term.NewTerminal(channel, "$ ")
-        // wg.Add(1)
-        // go func(){
-        //     defer func(){
-        //         log.Println("Closing everything")
-        //         channel.Close()
-        //         wg.Done()
-        //     }()
-        //     for {
-        //         log.Printf("entering")
-        //         line, err := terminal.ReadLine()
-        //         log.Printf(line)
-        //         if err != nil {
-        //             break
-        //         }
-        //         log.Printf("Read: %s\n", line)
-        //         if line == "exit"{
-        //             break
-        //         }
-        //     }
-        // }()
+        go handleConnection(conn, config)
     }
+
 }
 
 func readKeys(file string) map[string]bool{
@@ -138,4 +79,61 @@ func readKeys(file string) map[string]bool{
         authorizedKeysBytes = rest
     }
     return authorizedKeysMap
+}
+
+func handleInput(channel ssh.Channel){
+        for {
+            data := make([]byte, 256)
+            n, err := channel.Read(data)
+            if err != nil {
+                if err == io.EOF{
+                    break
+                }
+                panic("Error reading channel data")
+            }
+            log.Println(string(data[:n]))
+        }
+}
+
+func handleConnection(conn net.Conn, config *ssh.ServerConfig){
+    //now we have to perform the SSH handshake
+    _, ch, reqch, err := ssh.NewServerConn(conn, config)
+    if err != nil{
+        panic("Error during the Handshake")
+    }
+
+    //Handling sync with the different server connections
+    var wg sync.WaitGroup
+    //with this the function will not exit focus untill all the request have been fulfilled
+    defer wg.Wait()
+
+    wg.Add(1)
+    go func(){
+        //TODO: Handle this 
+        ssh.DiscardRequests(reqch)//we are discarding all the requests
+        wg.Done()
+    }()
+
+    for newChannel := range ch{
+        //we only handle shell sessions, these are signed with the type session
+        if newChannel.ChannelType() != "session"{
+            newChannel.Reject(ssh.UnknownChannelType, "unknown channel type")
+            continue
+        }
+        channel, req, err := newChannel.Accept()
+        if err != nil{
+            panic("Could not accept Channel")
+        }
+        wg.Add(1)
+        //handling requests
+        go func(in <-chan *ssh.Request){
+            for r := range in{
+                r.Reply(r.Type == "shell", nil)
+            }
+            wg.Done()
+        }(req)
+
+        go handleInput(channel)
+
+    }
 }
