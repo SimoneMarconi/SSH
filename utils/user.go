@@ -24,11 +24,11 @@ func (u User) String() string{
     return fmt.Sprintf("user: %s\npass: %s\nlog: %t", u.username, u.password, u.logged)
 }
 
-func (u User) Login(){
+func (u *User) Login(){
     u.logged = true
 }
 
-func (u User) LogOut(){
+func (u *User) LogOut(){
     u.logged = false 
 }
 
@@ -110,7 +110,7 @@ func addUser(channel ssh.Channel){
     }
 }
 
-func login(channel ssh.Channel) User {
+func login(channel ssh.Channel) *User {
     users, err := loadUsers()
     if err != nil{
         panic("Could not load Users")
@@ -124,19 +124,23 @@ func login(channel ssh.Channel) User {
     }
     fmt.Println(testUser.String())
     if res, u := checkUser(testUser, users); res == true{
+        if u.logged == true{
+            channel.Write([]byte("User already logged in"))
+            return u
+        }
         fmt.Printf("logging in %s\n", u.username)
+        channel.Write([]byte("Login Successfull\n"))
         go handleLogintime(u)
-        
+        return u
     }
-    return testUser
+    channel.Write([]byte("Wrong Username or Password"))
+    return nil
 }
 
 func handleLogintime(u *User){
-    u.Login()
+    u.logged = true
     timer := time.NewTimer(time.Second * 10).C
     <-timer
     u.logged = false
     fmt.Printf("logging out %s\n", u.username)
 }
-
-//TODO: Handle already logged, check for login in the server requests

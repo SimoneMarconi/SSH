@@ -10,6 +10,7 @@ import (
 )
 
 func HandleInput(channel ssh.Channel){
+        var currentUser *User
         for {
             channel.Write([]byte("> "))
             data := make([]byte, 256)
@@ -21,8 +22,7 @@ func HandleInput(channel ssh.Channel){
                 panic("Error reading channel data")
             }
         input := string(data[:n-1])
-        log.Println(input[:len(input) - 1])
-        var currentUser User
+        log.Println(input)
         switch (input){
         case "addUser":
             addUser(channel) 
@@ -30,6 +30,11 @@ func HandleInput(channel ssh.Channel){
         case "login":
             currentUser = login(channel)
             defer currentUser.LogOut()
+            break
+        case "chat":
+            log.Println("checking for nil : " + currentUser.String())
+            Init(currentUser, channel)
+            break
         case "exit":
             channel.Close()
             break
