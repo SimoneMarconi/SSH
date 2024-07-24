@@ -9,11 +9,6 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-type User struct{
-    username []byte
-    password []byte
-}
-
 func HandleInput(channel ssh.Channel){
         for {
             channel.Write([]byte("> "))
@@ -26,11 +21,15 @@ func HandleInput(channel ssh.Channel){
                 panic("Error reading channel data")
             }
         input := string(data[:n-1])
-        log.Println(input)
+        log.Println(input[:len(input) - 1])
+        var currentUser User
         switch (input){
         case "addUser":
             addUser(channel) 
             break
+        case "login":
+            currentUser = login(channel)
+            defer currentUser.LogOut()
         case "exit":
             channel.Close()
             break
@@ -56,9 +55,9 @@ func readInput(prompt string, channel ssh.Channel) []byte{
 }
 
 
-func hashData(username, password []byte) []byte{
-    hash := sha256.Sum256(password)
-    storing := append(username, ':')
+func hashData(u User) []byte{
+    hash := sha256.Sum256(u.password)
+    storing := append(u.username, ':')
     storing = append(storing, hash[:]...)
     return storing
 }

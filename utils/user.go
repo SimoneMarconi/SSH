@@ -2,30 +2,51 @@ package utils
 
 import (
 	"bufio"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"log"
 	"os"
 	"slices"
 	"strings"
+	"time"
 
 	"golang.org/x/crypto/ssh"
 )
 
-func checkUser(username, password []byte, users map[string][]byte) bool {
-    val, ok := users[string(username)]
-    if !ok{
-        return false
-    }
-    comp := slices.Compare(val, password)
-    if comp == 0{
-        return true
-    }
-    return false
+type User struct{
+    username []byte
+    password []byte
+    logged bool
 }
 
-func loadUsers() (map[string][]byte, error){
-    users := make(map[string][]byte)
+func (u User) String() string{
+    return fmt.Sprintf("user: %s\npass: %s\nlog: %t", u.username, u.password, u.logged)
+}
+
+func (u User) Login(){
+    u.logged = true
+}
+
+func (u User) LogOut(){
+    u.logged = false 
+}
+
+func checkUser(u User, users map[string]User) (bool, *User){
+    val, ok := users[string(u.username)]
+    if !ok{
+        return false, nil
+    }
+    hash := sha256.Sum256(u.password)
+    comp := slices.Compare(hash[:], val.password)
+    if comp == 0{
+        return true, &val
+    }
+    return false, nil
+}
+
+func loadUsers() (map[string]User, error){
+    users := make(map[string]User)
     file, err := os.Open("./files/users.txt")
     if err != nil{
         return nil, err
@@ -35,22 +56,23 @@ func loadUsers() (map[string][]byte, error){
     for scanner.Scan(){
         line := scanner.Text()
         log.Println("line scanned" + line)
-        idx := strings.Index(line, ":")
-        if idx == -1{
-            break 
+        tokens := strings.Split(line, ":")
+        username := tokens[0]
+        password := tokens[1]
+        //TODO: handle logged in the file
+        users[username] = User{
+            username: []byte(username),
+            password: []byte(password),
+            logged: false,
         }
-        log.Println(idx)
-        username := line[:idx]
-        password := line[idx + 1:]
-        users[username] = []byte(password)
     }
-    log.Printf("this is the map: %s",users)
+    // log.Printf("this is the map: %s",users)
     return users, nil
 }
 
-func saveUser(username, password []byte, users map[string][]byte) error{
-    hash := hashData(username, password)
-    _, found := users[string(username)]
+func saveUser(u User, users map[string]User) error{
+    hash := hashData(u)
+    _, found := users[string(u.username)]
     if found {
         return errors.New("Username already in use") 
     }
@@ -81,8 +103,40 @@ func addUser(channel ssh.Channel){
     var newUser User
     newUser.username = readInput("Username: ", channel)
     newUser.password = readInput("Password: ", channel)
-    err = saveUser(newUser.username, newUser.password, users)
+    newUser.logged = false
+    err = saveUser(newUser, users)
     if err != nil{
         channel.Write([]byte(fmt.Sprintf("%s\n", err)))
     }
 }
+
+func login(channel ssh.Channel) User {
+    users, err := loadUsers()
+    if err != nil{
+        panic("Could not load Users")
+    }
+    username := readInput("Username: ", channel)
+    password := readInput("Password: ", channel)
+    testUser := User{
+        username: username,
+        password: password,
+        logged: false,
+    }
+    fmt.Println(testUser.String())
+    if res, u := checkUser(testUser, users); res == true{
+        fmt.Printf("logging in %s\n", u.username)
+        go handleLogintime(u)
+        
+    }
+    return testUser
+}
+
+func handleLogintime(u *User){
+    u.Login()
+    timer := time.NewTimer(time.Second * 10).C
+    <-timer
+    u.logged = false
+    fmt.Printf("logging out %s\n", u.username)
+}
+
+//TODO: Handle already logged, check for login in the server requests
