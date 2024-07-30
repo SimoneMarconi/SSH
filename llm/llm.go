@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
-	"strings"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -38,23 +37,21 @@ func (r Request) Send(channel ssh.Channel){
     if err := cmd.Start(); err != nil{
         panic(err)
     }
+    reader := bufio.NewReader(stdout)
     for{
         var token Res
-        test := make([]byte, 256)
-        n, _:= stdout.Read(test)
-        // fmt.Println(string(test))
-        if n < 2 {
-            fmt.Println("not reading")
+        line, _, err := reader.ReadLine()
+        if err != nil{
+            fmt.Println(err)
             break
         }
-        //Only reading 256 bytes, fix this
-        reader := bufio.NewReader(stdout)
-        line, _, _ := reader.ReadLine()
-        fmt.Println(string(line))
-        if err := json.NewDecoder(strings.NewReader(string(line))).Decode(&token); err != nil{
-            fmt.Println(err, n)
-            break
+        if len(line) != 0 {
+            err := json.Unmarshal(line, &token)
+            if err != nil {
+                panic(err)
+            }
+            channel.Write([]byte(token.Response))
         }
-        channel.Write([]byte(token.Response))
     }
+    channel.Write([]byte("\n"))
 }
