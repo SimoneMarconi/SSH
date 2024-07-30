@@ -15,12 +15,6 @@ func main() {
     KeysMap := readKeys("./files/authorized_keys")
     //config is the config struct to handle SSH for a tcp server
     config := &ssh.ServerConfig{
-        // PasswordCallback: func(c ssh.ConnMetadata, pass []byte) (*ssh.Permissions, error){
-        //     if c.User() == "server" && string(pass) == "ciao"{
-        //         return nil, nil
-        //     }
-        //     return nil, fmt.Errorf("Wrong password")
-        // },
         NoClientAuth: true,
         PublicKeyCallback: func(c ssh.ConnMetadata, key ssh.PublicKey)(*ssh.Permissions, error){
             if KeysMap[string(key.Marshal())]{
